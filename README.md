@@ -2,6 +2,8 @@
 
 CacheShield is a .NET library that extends `IDistributedCache` to prevent cache stampede issues by using per-key asynchronous locks. It ensures that only one caller computes the value when it's missing or expired, improving performance and reducing load on your data source.
 
+Inspired by: [mgravell/DistributedCacheDemo](https://github.com/mgravell/DistributedCacheDemo)
+
 ## Features
 
 - **Prevent Cache Stampede**: Ensures only one caller computes a missing cache value.
