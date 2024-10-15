@@ -40,7 +40,15 @@ jobs:
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: 8.0.x
-
+        
+    - name: Extract version from tag
+      id: extract_version
+      shell: bash
+      run: |
+        echo "Extracting version from tag..."
+        VERSION=${GITHUB_REF#refs/tags/v}
+        echo "VERSION=$VERSION" >> $GITHUB_ENV
+        
     - name: Restore dependencies
       run: dotnet restore
 
@@ -48,7 +56,7 @@ jobs:
       run: dotnet build --no-restore --configuration Release
 
     - name: Pack
-      run: dotnet pack --no-build --configuration Release -o ./nupkg
+      run: dotnet pack --no-build --configuration Release -o ./nupkg /p:PackageVersion=${{ env.VERSION }}
 
     - name: Publish to NuGet
       run: dotnet nuget push ./nupkg/*.nupkg -s https://api.nuget.org/v3/index.json -k ${{ secrets.NUGET_API_KEY }}
