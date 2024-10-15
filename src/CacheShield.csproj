@@ -3,7 +3,6 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
 	  <PackageId>CacheShield</PackageId>
-	  <Version>1.0.2</Version>
 	  <Authors>Lubos Voska</Authors>
 	  <Company></Company>
 	  <Description>A distributed cache extension that prevents cache stampedes using per-key locks.</Description>
