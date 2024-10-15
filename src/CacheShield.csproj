@@ -11,6 +11,8 @@
 	  <RepositoryUrl>https://github.com/YourUsername/CacheShield</RepositoryUrl>
 	  <PackageLicenseExpression>MIT</PackageLicenseExpression>
 	  <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+	  <RepositoryUrl>https://github.com/LubosVoska/CacheShield.git</RepositoryUrl>
+	  <RepositoryType>git</RepositoryType>
   </PropertyGroup>
 
   <ItemGroup>
