@@ -4,12 +4,13 @@ CacheShield is a .NET library that extends `IDistributedCache` to prevent cache 
 
 ## Features
 
-- **Prevent Cache Stampede**: Ensures only one caller computes a missing cache value.
-- **Asynchronous Support**: Fully supports asynchronous programming patterns.
-- **Easy Integration**: Works with any `IDistributedCache` implementation.
-- **Configurable Cache Options**: Includes a wide range of predefined cache durations for convenience.
-- **Stateful and Stateless Methods**: Supports both stateful and stateless `getMethod` delegates.
-- **Custom Serialization**: Allows customization of serialization mechanisms if needed.
+* **Prevent Cache Stampede**: Ensures only one caller computes a missing cache value.
+* **Asynchronous Support**: Fully supports asynchronous programming patterns.
+* **Easy Integration**: Works with any IDistributedCache implementation.
+* **Configurable Cache Options**: Includes a wide range of predefined cache durations for convenience.
+* **Stateful and Stateless Methods**: Supports both stateful and stateless getMethod delegates.
+* **Custom Serialization**: Allows customization of serialization mechanisms if needed.
+* **MessagePack Serialization**: Uses MessagePack for efficient binary serialization by default.
 
 ## Installation
 
@@ -27,7 +28,7 @@ Install-Package CacheShield
 
 ## Usage
 ### Basic Usage
-To use CacheShield, call the GetAsync extension method on your IDistributedCache instance. Provide a cache key, a method to retrieve the value if it's not in the cache, and optionally, cache entry options.
+To use CacheShield, call the GetOrCreateAsync extension method on your `IDistributedCache` instance. Provide a cache key, a method to retrieve the value if it's not in the cache, and optionally, cache entry options.
 
 ```csharp
 using Microsoft.Extensions.Caching.Distributed;
@@ -44,11 +45,11 @@ public class MyService
 
     public async Task<MyData> GetDataAsync(string id)
     {
-        var data = await _cache.GetAsync($"data:{id}", async cancellationToken =>
+        var data = await _cache.GetOrCreateAsync($"data:{id}", async cancellationToken =>
         {
             // This code runs only if the data is not in the cache
             return await FetchDataFromDatabaseAsync(id, cancellationToken);
-        }, CacheOptions.FiveMinutes);
+        }, options: CacheOptions.FiveMinutes);
 
         return data;
     }
@@ -61,7 +62,7 @@ public class MyService
 ```
 
 ### Using Predefined Cache Durations
-CacheShield includes a CacheOptions class with over 50 predefined cache durations for convenience.
+CacheShield includes a `CacheOptions` class with over 50 predefined cache durations for convenience.
 
 ```csharp
 using CacheShield;
@@ -69,20 +70,31 @@ using CacheShield;
 // Use a predefined cache duration
 var cacheEntryOptions = CacheOptions.ThirtyMinutes;
 
-var value = await _cache.GetAsync("cacheKey", async cancellationToken =>
+var value = await _cache.GetOrCreateAsync("cacheKey", async cancellationToken =>
 {
     // Compute the value
     return await ComputeValueAsync(cancellationToken);
-}, cacheEntryOptions);
+}, options: cacheEntryOptions);
 ```
 
 ### Stateless Get Method
 If your `getMethod` does not need any state or cancellation token, you can use the simpler overload:
 
 ```csharp
+var value = await _cache.GetOrCreateAsync("simpleKey", () =>
+{
+    // Compute the value
+    return ComputeValue();
+});
+```
+
+### Stateful Get Method
+If your `getMethod` requires state, you can use the stateful overload:
+
+```csharp
 var someState = new MyStateObject();
 
-var value = await _cache.GetAsync("statefulKey", someState, (state, cancellationToken) =>
+var value = await _cache.GetOrCreateAsync("statefulKey", someState, (state, cancellationToken) =>
 {
     // Use the state object
     return ComputeValueWithStateAsync(state, cancellationToken);
@@ -97,7 +109,7 @@ var tasks = new List<Task<string>>();
 
 for (int i = 0; i < 10; i++)
 {
-    tasks.Add(_cache.GetAsync("concurrentKey", async cancellationToken =>
+    tasks.Add(_cache.GetOrCreateAsync("concurrentKey", async cancellationToken =>
     {
         // Simulate a delay in computing the value
         await Task.Delay(1000, cancellationToken);
@@ -120,18 +132,18 @@ var customOptions = new DistributedCacheEntryOptions
     SlidingExpiration = TimeSpan.FromMinutes(5)
 };
 
-var value = await _cache.GetAsync("customKey", async cancellationToken =>
+var value = await _cache.GetOrCreateAsync("customKey", async cancellationToken =>
 {
     // Compute the value
     return await GetValueAsync(cancellationToken);
-}, customOptions);
+}, options: customOptions);
 ```
 
 ### Synchronous Get Method
 If your `getMethod` is synchronous, you can use the overload that accepts a synchronous function:
 
 ```csharp
-var value = await _cache.GetAsync("syncKey", () =>
+var value = await _cache.GetOrCreateAsync("syncKey", () =>
 {
     // Compute the value synchronously
     return "Synchronous Value";
@@ -144,7 +156,7 @@ You can pass a `CancellationToken` to cancel the operation if needed:
 ```csharp
 var cancellationTokenSource = new CancellationTokenSource();
 
-var value = await _cache.GetAsync("cancellableKey", async cancellationToken =>
+var value = await _cache.GetOrCreateAsync("cancellableKey", async cancellationToken =>
 {
     // Long-running operation that supports cancellation
     return await LongRunningOperationAsync(cancellationToken);
@@ -157,7 +169,7 @@ If the `getMethod` throws an exception, it will propagate to the caller. You can
 ```csharp
 try
 {
-    var value = await _cache.GetAsync("exceptionKey", () =>
+    var value = await _cache.GetOrCreateAsync("exceptionKey", () =>
     {
         // This might throw an exception
         throw new InvalidOperationException("Something went wrong");
@@ -170,21 +182,34 @@ catch (InvalidOperationException ex)
 ```
 
 ### Custom Serialization
-By default, CacheShield uses `System.Text.Json.JsonSerializer` for serialization. If you need custom serialization, you can modify the `Serialize` and `Deserialize` methods in the `DistributedCacheExtensions` class.
+By default, CacheShield uses MessagePack for serialization. If you need custom serialization, you can implement the `ISerializer` interface and pass your serializer to the `GetOrCreateAsync` method.
 
 ```csharp
-// Example of using Newtonsoft.Json instead
-private static T Deserialize<T>(byte[] bytes)
+using CacheShield;
+
+public class NewtonsoftJsonSerializer : ISerializer
 {
-    var json = Encoding.UTF8.GetString(bytes);
-    return JsonConvert.DeserializeObject<T>(json);
+    public byte[] Serialize<T>(T value)
+    {
+        var json = Newtonsoft.Json.JsonConvert.SerializeObject(value);
+        return System.Text.Encoding.UTF8.GetBytes(json);
+    }
+
+    public T Deserialize<T>(byte[] bytes)
+    {
+        var json = System.Text.Encoding.UTF8.GetString(bytes);
+        return Newtonsoft.Json.JsonConvert.DeserializeObject<T>(json);
+    }
 }
 
-private static byte[] Serialize<T>(T value)
+// Usage
+var customSerializer = new NewtonsoftJsonSerializer();
+
+var value = await _cache.GetOrCreateAsync("customSerializerKey", async cancellationToken =>
 {
-    var json = JsonConvert.SerializeObject(value);
-    return Encoding.UTF8.GetBytes(json);
-}
+    // Compute the value
+    return await GetValueAsync(cancellationToken);
+}, serializer: customSerializer);
 ```
 
 ### Full Example with Custom Cache Options
@@ -207,12 +232,12 @@ public class ProductService
     {
         var cacheKey = $"product:{productId}";
 
-        var product = await _cache.GetAsync(cacheKey, async cancellationToken =>
+        var product = await _cache.GetOrCreateAsync(cacheKey, async cancellationToken =>
         {
             // Simulate a database call
             var data = await FetchProductFromDatabaseAsync(productId, cancellationToken);
             return data;
-        }, CacheOptions.TwelveHours);
+        }, options: CacheOptions.TwelveHours);
 
         return product;
     }
@@ -250,11 +275,11 @@ var slidingOptions = new DistributedCacheEntryOptions
     SlidingExpiration = TimeSpan.FromMinutes(30)
 };
 
-var value = await _cache.GetAsync("slidingKey", async cancellationToken =>
+var value = await _cache.GetOrCreateAsync("slidingKey", async cancellationToken =>
 {
     // Compute the value
     return await ComputeExpensiveValueAsync(cancellationToken);
-}, slidingOptions);
+}, options: slidingOptions);
 ```
 
 ### Combining Absolute and Sliding Expiration
@@ -267,22 +292,22 @@ var combinedOptions = new DistributedCacheEntryOptions
     SlidingExpiration = TimeSpan.FromMinutes(30)
 };
 
-var value = await _cache.GetAsync("combinedKey", async cancellationToken =>
+var value = await _cache.GetOrCreateAsync("combinedKey", async cancellationToken =>
 {
     // Compute the value
     return await GetDataAsync(cancellationToken);
-}, combinedOptions);
+}, options: combinedOptions);
 ```
 
 ### Using the Infinite Cache Option
 If you have data that rarely changes and you want to cache it indefinitely:
 
 ```csharp
-var value = await _cache.GetAsync("infiniteKey", async cancellationToken =>
+var value = await _cache.GetOrCreateAsync("infiniteKey", async cancellationToken =>
 {
     // Compute the value
     return await GetStaticDataAsync(cancellationToken);
-}, CacheOptions.Infinite);
+}, options: CacheOptions.Infinite);
 ```
 Note: Use the `Infinite` option cautiously to avoid consuming excessive memory or stale data.
 
