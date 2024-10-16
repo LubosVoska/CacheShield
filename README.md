@@ -16,8 +16,7 @@ Inspired by: [mgravell/DistributedCacheDemo](https://github.com/mgravell/Distrib
 
 ## Installation
 
-Install via NuGet:
-
+Install via NuGet: [Nuget package](https://www.nuget.org/packages/CacheShield)
 ```bash
 dotnet add package CacheShield
 ```
