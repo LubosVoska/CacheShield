@@ -1,6 +1,5 @@
 ﻿using Microsoft.Extensions.Caching.Distributed;
 using System;
-using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -11,8 +10,8 @@ namespace CacheShield
     /// </summary>
     public static class DistributedCacheExtensions
     {
-        // Dictionary to hold per-key semaphores with cleanup
-        private static readonly ConcurrentDictionary<string, SemaphoreSlim> _keyLocks = new();
+        // Keyed lock pool with ref-counting and sliding eviction
+        private static readonly KeyLockPool _lockPool = KeyLockPool.Shared;
 
         // Default serializer instance
         private static readonly ISerializer _defaultSerializer = new MessagePackSerializerWrapper();
@@ -30,6 +29,7 @@ namespace CacheShield
             CancellationToken cancellationToken = default)
         {
             if (cache is null) throw new ArgumentNullException(nameof(cache));
+            if (string.IsNullOrWhiteSpace(key)) throw new ArgumentException("Key cannot be null or whitespace.", nameof(key));
             if (getMethod is null) throw new ArgumentNullException(nameof(getMethod));
 
             serializer ??= _defaultSerializer;
@@ -42,18 +42,16 @@ namespace CacheShield
                 {
                     return serializer.Deserialize<T>(cachedData);
                 }
-                catch (Exception ex)
+                catch
                 {
-                    // Optionally log the deserialization error
-                    // Remove the corrupted cache entry
+                    // Remove the corrupted cache entry and continue to fetch fresh data
                     await cache.RemoveAsync(key, cancellationToken).ConfigureAwait(false);
-                    // Depending on requirements, you might choose to throw or continue to fetch fresh data
                 }
             }
 
-            // Acquire the semaphore for the specific cache key
-            var semaphore = _keyLocks.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
-            await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+            // Acquire per-key lock via pool
+            var entry = _lockPool.Rent(key);
+            await entry.Semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
                 // Double-check if the data was added to the cache while waiting for the lock
@@ -64,11 +62,9 @@ namespace CacheShield
                     {
                         return serializer.Deserialize<T>(cachedData);
                     }
-                    catch (Exception ex)
+                    catch
                     {
-                        // Optionally log the deserialization error
                         await cache.RemoveAsync(key, cancellationToken).ConfigureAwait(false);
-                        // Depending on requirements, you might choose to throw or continue to fetch fresh data
                     }
                 }
 
@@ -78,31 +74,22 @@ namespace CacheShield
                 // Serialize the result
                 byte[] serializedData = serializer.Serialize(result);
 
-                // Set the cache entry with provided options or default options
-                var cacheOptions = options ?? new DistributedCacheEntryOptions
-                {
-                    AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5) // Default expiration
-                };
+                // Use provided options or a safe default
+                var cacheOptions = options != null
+                    ? Clone(options)
+                    : new DistributedCacheEntryOptions
+                    {
+                        AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5)
+                    };
 
                 await cache.SetAsync(key, serializedData, cacheOptions, cancellationToken).ConfigureAwait(false);
 
                 return result;
             }
-            catch (Exception)
-            {
-                // Optionally log the exception
-                throw;
-            }
             finally
             {
-                semaphore.Release();
-
-                // Cleanup: Remove the semaphore if no other threads are waiting
-                if (semaphore.CurrentCount == 1)
-                {
-                    _keyLocks.TryRemove(key, out _);
-                    semaphore.Dispose();
-                }
+                entry.Semaphore.Release();
+                _lockPool.Return(key, entry);
             }
         }
 
@@ -120,8 +107,12 @@ namespace CacheShield
         {
             if (getMethod is null) throw new ArgumentNullException(nameof(getMethod));
 
-            // Wrap the synchronous getMethod in an asynchronous lambda
-            return await cache.GetOrCreateAsync(key, ct => new ValueTask<T>(getMethod()), serializer, options, cancellationToken).ConfigureAwait(false);
+            return await cache.GetOrCreateAsync(
+                key,
+                ct => new ValueTask<T>(getMethod()),
+                serializer,
+                options,
+                cancellationToken).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -139,8 +130,12 @@ namespace CacheShield
         {
             if (getMethod is null) throw new ArgumentNullException(nameof(getMethod));
 
-            // Wrap the stateful getMethod in a state-less lambda
-            return await cache.GetOrCreateAsync(key, ct => getMethod(state, ct), serializer, options, cancellationToken).ConfigureAwait(false);
+            return await cache.GetOrCreateAsync(
+                key,
+                ct => getMethod(state, ct),
+                serializer,
+                options,
+                cancellationToken).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -158,8 +153,22 @@ namespace CacheShield
         {
             if (getMethod is null) throw new ArgumentNullException(nameof(getMethod));
 
-            // Wrap the stateful getMethod in an asynchronous lambda
-            return await cache.GetOrCreateAsync(key, ct => new ValueTask<T>(getMethod(state)), serializer, options, cancellationToken).ConfigureAwait(false);
+            return await cache.GetOrCreateAsync(
+                key,
+                ct => new ValueTask<T>(getMethod(state)),
+                serializer,
+                options,
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        private static DistributedCacheEntryOptions Clone(DistributedCacheEntryOptions src)
+        {
+            return new DistributedCacheEntryOptions
+            {
+                AbsoluteExpiration = src.AbsoluteExpiration,
+                AbsoluteExpirationRelativeToNow = src.AbsoluteExpirationRelativeToNow,
+                SlidingExpiration = src.SlidingExpiration
+            };
         }
     }
 }

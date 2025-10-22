@@ -1,22 +1,37 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
-	  <PackageId>CacheShield</PackageId>
-	  <Authors>Lubos Voska</Authors>
-	  <Company></Company>
-	  <Description>A distributed cache extension that prevents cache stampedes using per-key locks.</Description>
-	  <PackageTags>caching;distributed cache;extensions;cache stampede</PackageTags>
-	  <RepositoryUrl>https://github.com/YourUsername/CacheShield</RepositoryUrl>
-	  <PackageLicenseExpression>MIT</PackageLicenseExpression>
-	  <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-	  <RepositoryUrl>https://github.com/LubosVoska/CacheShield.git</RepositoryUrl>
-	  <RepositoryType>git</RepositoryType>
+    <TargetFrameworks>net8.0;net9.0;netstandard2.1</TargetFrameworks>
+	<LangVersion>9.0</LangVersion>
+	<PackageId>CacheShield</PackageId>
+    <Authors>Lubos Voska</Authors>
+    <Company></Company>
+    <Description>A distributed cache extension that prevents cache stampedes using per-key locks.</Description>
+    <PackageTags>caching;distributed cache;extensions;cache stampede</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <RepositoryUrl>https://github.com/LubosVoska/CacheShield.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
   </PropertyGroup>
 
+  <!-- Shared packages -->
   <ItemGroup>
     <PackageReference Include="MessagePack" Version="2.5.172" />
+  </ItemGroup>
+
+  <!-- net8.0-specific packages -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
     <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" Version="8.0.0" />
+  </ItemGroup>
+
+  <!-- net9.0-specific packages -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net9.0'">
+    <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" Version="9.0.0" />
+  </ItemGroup>
+
+  <!-- netstandard2.1-specific packages -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
+    <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" Version="5.0.0" />
   </ItemGroup>
 
 </Project>

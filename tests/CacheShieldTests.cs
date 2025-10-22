@@ -3,8 +3,6 @@ using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using Moq;
 using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace CacheShield.Tests
 {
@@ -178,6 +176,39 @@ namespace CacheShield.Tests
         }
 
         [Fact]
+        public async Task GetOrCreateAsync_CustomSerializer_UsedOnHit_DoesNotSerializeOrSet()
+        {
+            // Arrange
+            string key = "serializer_hit_key";
+            string expectedValue = "cached_value";
+            var bytes = Encoding.UTF8.GetBytes("payload");
+
+            var customSerializerMock = new Mock<ISerializer>();
+            customSerializerMock.Setup(s => s.Deserialize<string>(bytes))
+                                .Returns(expectedValue);
+
+            _cacheMock.Setup(c => c.GetAsync(key, It.IsAny<CancellationToken>()))
+                      .ReturnsAsync(bytes);
+
+            // Act
+            var actual = await _cacheMock.Object.GetOrCreateAsync(
+                key,
+                () => "new_value",
+                customSerializerMock.Object,
+                options: null);
+
+            // Assert
+            Assert.Equal(expectedValue, actual);
+            customSerializerMock.Verify(s => s.Deserialize<string>(bytes), Times.Once);
+            customSerializerMock.Verify(s => s.Serialize(It.IsAny<string>()), Times.Never);
+            _cacheMock.Verify(c => c.SetAsync(
+                It.IsAny<string>(),
+                It.IsAny<byte[]>(),
+                It.IsAny<DistributedCacheEntryOptions>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [Fact]
         public async Task GetOrCreateAsync_ConcurrentAccess_GetMethodCalledOnce()
         {
             // Arrange
@@ -249,7 +280,7 @@ namespace CacheShield.Tests
             // Act & Assert
             var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             {
-                var val = await _cacheMock.Object.GetOrCreateAsync(
+                var _ = await _cacheMock.Object.GetOrCreateAsync(
                     key,
                     getMethod,
                     options: null);
@@ -295,6 +326,108 @@ namespace CacheShield.Tests
                 Times.Once);
         }
 
+        [Theory]
+        [InlineData(null)]
+        [InlineData("")]
+        [InlineData(" ")]
+        public async Task GetOrCreateAsync_InvalidKey_Throws(string key)
+        {
+            await Assert.ThrowsAsync<ArgumentException>(async () =>
+            {
+                var _ = await _cacheMock.Object.GetOrCreateAsync(
+                    key,
+                    () => "value",
+                    options: null);
+            });
+        }
+
+        [Fact]
+        public async Task GetOrCreateAsync_InfiniteOptions_SetsNoExpiration()
+        {
+            // Arrange
+            string key = "infinite_key";
+            string expected = "val";
+
+            _cacheMock.Setup(c => c.GetAsync(key, It.IsAny<CancellationToken>()))
+                      .ReturnsAsync((byte[])null);
+
+            _cacheMock.Setup(c => c.SetAsync(
+                key,
+                It.IsAny<byte[]>(),
+                It.Is<DistributedCacheEntryOptions>(o =>
+                    o.AbsoluteExpiration == null &&
+                    o.AbsoluteExpirationRelativeToNow == null &&
+                    o.SlidingExpiration == null),
+                It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask)
+                .Verifiable();
+
+            // Act
+            var result = await _cacheMock.Object.GetOrCreateAsync(
+                key,
+                () => expected,
+                options: CacheOptions.Infinite);
+
+            // Assert
+            Assert.Equal(expected, result);
+            _cacheMock.VerifyAll();
+        }
+
+        [Fact]
+        public async Task GetOrCreateAsync_StatefulAsync_UsesState_AndCaches()
+        {
+            // Arrange
+            string key = "stateful_async_key";
+            int state = 7;
+            string expected = $"state:{state}";
+
+            _cacheMock.Setup(c => c.GetAsync(key, It.IsAny<CancellationToken>()))
+                      .ReturnsAsync((byte[])null);
+            _cacheMock.Setup(c => c.SetAsync(
+                key,
+                It.IsAny<byte[]>(),
+                It.IsAny<DistributedCacheEntryOptions>(),
+                It.IsAny<CancellationToken>()))
+                      .Returns(Task.CompletedTask);
+
+            // Act
+            var actual = await _cacheMock.Object.GetOrCreateAsync(
+                key,
+                state,
+                (s, ct) => new ValueTask<string>($"state:{s}"),
+                options: CacheOptions.FiveMinutes);
+
+            // Assert
+            Assert.Equal(expected, actual);
+        }
+
+        [Fact]
+        public async Task GetOrCreateAsync_StatefulSync_UsesState_AndCaches()
+        {
+            // Arrange
+            string key = "stateful_sync_key";
+            string expected = "state:ok";
+
+            _cacheMock.Setup(c => c.GetAsync(key, It.IsAny<CancellationToken>()))
+                      .ReturnsAsync((byte[])null);
+            _cacheMock.Setup(c => c.SetAsync(
+                key,
+                It.IsAny<byte[]>(),
+                It.IsAny<DistributedCacheEntryOptions>(),
+                It.IsAny<CancellationToken>()))
+                      .Returns(Task.CompletedTask);
+
+            // Act
+            var actual = await _cacheMock.Object.GetOrCreateAsync(
+                key,
+                "ok",
+                s => $"state:{s}",
+                options: CacheOptions.FiveMinutes);
+
+            // Assert
+            Assert.Equal(expected, actual);
+        }
+
         /// <summary>
         /// Helper method to compare two byte arrays for equality.
         /// </summary>
@@ -309,6 +442,5 @@ namespace CacheShield.Tests
             }
             return true;
         }
-
     }
 }

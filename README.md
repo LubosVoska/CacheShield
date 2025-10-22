@@ -2,17 +2,18 @@
 
 CacheShield is a .NET library that extends `IDistributedCache` to prevent cache stampede issues by using per-key asynchronous locks. It ensures that only one caller computes the value when it's missing or expired, improving performance and reducing load on your data source.
 
-Inspired by: [mgravell/DistributedCacheDemo](https://github.com/mgravell/DistributedCacheDemo)
+Inspired by: https://github.com/mgravell/DistributedCacheDemo
 
 ## Features
 
-* **Prevent Cache Stampede**: Ensures only one caller computes a missing cache value.
-* **Asynchronous Support**: Fully supports asynchronous programming patterns.
-* **Easy Integration**: Works with any IDistributedCache implementation.
-* **Configurable Cache Options**: Includes a wide range of predefined cache durations for convenience.
-* **Stateful and Stateless Methods**: Supports both stateful and stateless getMethod delegates.
-* **Custom Serialization**: Allows customization of serialization mechanisms if needed.
-* **MessagePack Serialization**: Uses MessagePack for efficient binary serialization by default.
+- Prevent Cache Stampede: Ensures only one caller computes a missing cache value.
+- Asynchronous Support: Fully supports async patterns (`ValueTask`-based get delegates).
+- Easy Integration: Works with any `IDistributedCache` implementation.
+- Configurable Cache Options: Includes a wide range of predefined cache durations for convenience.
+- Stateful and Stateless Methods: Supports both stateful and stateless getMethod delegates.
+- Custom Serialization: Allows customization of serialization mechanisms if needed.
+- MessagePack Serialization: Uses MessagePack for efficient binary serialization by default.
+- Memory-bounded keyed locks: Uses a per-key lock pool with ref-counting and sliding eviction to prevent unbounded lock growth.
 
 ## Installation
 
@@ -29,7 +30,7 @@ Install-Package CacheShield
 
 ## Usage
 ### Basic Usage
-To use CacheShield, call the GetOrCreateAsync extension method on your `IDistributedCache` instance. Provide a cache key, a method to retrieve the value if it's not in the cache, and optionally, cache entry options.
+To use CacheShield, call the `GetOrCreateAsync` extension method on your `IDistributedCache` instance. Provide a cache key, a method to retrieve the value if it's not in the cache, and optionally, cache entry options.
 
 ```csharp
 using Microsoft.Extensions.Caching.Distributed;
@@ -63,7 +64,7 @@ public class MyService
 ```
 
 ### Using Predefined Cache Durations
-CacheShield includes a `CacheOptions` class with over 50 predefined cache durations for convenience.
+CacheShield includes a `CacheOptions` class with over50 predefined cache durations for convenience.
 
 ```csharp
 using CacheShield;
@@ -108,7 +109,7 @@ CacheShield automatically prevents cache stampedes by ensuring that only one cal
 ```csharp
 var tasks = new List<Task<string>>();
 
-for (int i = 0; i < 10; i++)
+for (int i =0; i <10; i++)
 {
     tasks.Add(_cache.GetOrCreateAsync("concurrentKey", async cancellationToken =>
     {
@@ -122,6 +123,21 @@ var results = await Task.WhenAll(tasks);
 
 // All tasks will receive the same computed value
 ```
+
+## Under the hood: keyed-lock pool with sliding eviction
+
+- Per-key locking is implemented using a pool of `SemaphoreSlim` instances keyed by cache key.
+- Each lock keeps a ref-count and last-used timestamp.
+- Locks are:
+ - Rented when a request arrives for a key (ref-count++ and last-used updated).
+ - Released when the request completes (ref-count--).
+- A lightweight background sweeper periodically evicts idle locks (ref-count ==0) that have not been used for a sliding window (default:2 minutes).
+- This bounds memory growth over time while preserving correctness and avoiding disposal races.
+
+Notes:
+- The keyed locks are process-local. If you need to prevent stampedes across multiple instances, consider adding a distributed lock around the compute section (e.g., Redis-based).
+- Corrupted cache payloads (deserialization failures) are automatically removed and recomputed.
+- `CacheOptions.Infinite` represents “no expiration” (no absolute or sliding expiry set). Use with care to avoid stale data or unnecessary memory pressure in your backing store.
 
 ### Custom Cache Entry Options
 You can provide custom cache entry options if the predefined ones do not meet your needs:
@@ -253,7 +269,7 @@ public class ProductService
         {
             Id = productId,
             Name = "Sample Product",
-            Price = 19.99m
+            Price =19.99m
         };
     }
 }
@@ -310,7 +326,7 @@ var value = await _cache.GetOrCreateAsync("infiniteKey", async cancellationToken
     return await GetStaticDataAsync(cancellationToken);
 }, options: CacheOptions.Infinite);
 ```
-Note: Use the `Infinite` option cautiously to avoid consuming excessive memory or stale data.
+Note: `Infinite` leaves expirations unset (no absolute or sliding expiry). Use cautiously to avoid stale data and memory pressure.
 
 ### Using CacheShield in ASP.NET Core
 You can configure `IDistributedCache` in your `Startup.cs` or `Program.cs`:
@@ -329,36 +345,36 @@ Then inject `IDistributedCache` into your services and use CacheShield as demons
 CacheShield provides the `CacheOptions` class with predefined cache durations:
 
 * Milliseconds:
-    * `TenMilliseconds`
-    * `FiftyMilliseconds`
-    * `OneHundredMilliseconds`
-    * `FiveHundredMilliseconds`
+ * `TenMilliseconds`
+ * `FiftyMilliseconds`
+ * `OneHundredMilliseconds`
+ * `FiveHundredMilliseconds`
 * Seconds:
-    * `OneSecond`
-    * `FiveSeconds`
-    * `TenSeconds`
-    * `ThirtySeconds`
+ * `OneSecond`
+ * `FiveSeconds`
+ * `TenSeconds`
+ * `ThirtySeconds`
 * Minutes:
-    * `OneMinute`
-    * `FiveMinutes`
-    * `FifteenMinutes`
-    * `ThirtyMinutes`
-    * `SixtyMinutes`
+ * `OneMinute`
+ * `FiveMinutes`
+ * `FifteenMinutes`
+ * `ThirtyMinutes`
+ * `SixtyMinutes`
 * Hours:
-    * `OneHour`
-    * `SixHours`
-    * `TwelveHours`
-    * `TwentyFourHours`
+ * `OneHour`
+ * `SixHours`
+ * `TwelveHours`
+ * `TwentyFourHours`
 * Days:
-    * `OneDay`
-    * `SevenDays`
-    * `ThirtyDays`
+ * `OneDay`
+ * `SevenDays`
+ * `ThirtyDays`
 * Months and Years:
-    * `OneMonth` (30 days)
-    * `SixMonths` (180 days)
-    * `OneYear` (365 days)
+ * `OneMonth` (30 days)
+ * `SixMonths` (180 days)
+ * `OneYear` (365 days)
 * Infinite:
-    * `Infinite` (no expiration)
+ * `Infinite` (no expiration)
 
 ## Contributing
 Contributions are welcome! Please open an issue or submit a pull request on GitHub.
