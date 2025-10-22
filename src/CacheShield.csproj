@@ -2,8 +2,10 @@
 
   <PropertyGroup>
     <TargetFrameworks>net8.0;net9.0;netstandard2.1</TargetFrameworks>
-	<LangVersion>9.0</LangVersion>
-	<PackageId>CacheShield</PackageId>
+    <LangVersion>latestmajor</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <PackageId>CacheShield</PackageId>
+    <Nullable>enable</Nullable>
     <Authors>Lubos Voska</Authors>
     <Company></Company>
     <Description>A distributed cache extension that prevents cache stampedes using per-key locks.</Description>

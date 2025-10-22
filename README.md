@@ -7,13 +7,19 @@ Inspired by: https://github.com/mgravell/DistributedCacheDemo
 ## Features
 
 - Prevent Cache Stampede: Ensures only one caller computes a missing cache value.
+- Stale-While-Revalidate (SWR): Serve stale data after soft TTL while a single background refresh updates the entry.
+- Early Refresh + Jitter: Proactively refresh near expiry and apply randomized expiration jitter to avoid thundering herds.
+- Lock Wait Timeout + Fallback: Avoid head-of-line blocking by returning stale/best-effort when lock wait exceeds a threshold.
 - Asynchronous Support: Fully supports async patterns (`ValueTask`-based get delegates).
+- Bulk API: `GetOrCreateManyAsync` for batched keys with bounded concurrency.
 - Easy Integration: Works with any `IDistributedCache` implementation.
 - Configurable Cache Options: Includes a wide range of predefined cache durations for convenience.
 - Stateful and Stateless Methods: Supports both stateful and stateless getMethod delegates.
 - Custom Serialization: Allows customization of serialization mechanisms if needed.
 - MessagePack Serialization: Uses MessagePack for efficient binary serialization by default.
 - Memory-bounded keyed locks: Uses a per-key lock pool with ref-counting and sliding eviction to prevent unbounded lock growth.
+- Global configuration: `CacheShield.Configure` for defaults like serializer, TTLs, jitter, key prefix, payload limits, and lock eviction.
+- Diagnostics: Emits OpenTelemetry-compatible metrics and activities (ActivitySource `CacheShield`, Meter `CacheShield`).
 
 ## Installation
 
@@ -38,90 +44,241 @@ using CacheShield;
 
 public class MyService
 {
-    private readonly IDistributedCache _cache;
+ private readonly IDistributedCache _cache;
 
-    public MyService(IDistributedCache cache)
-    {
-        _cache = cache;
-    }
+ public MyService(IDistributedCache cache)
+ {
+ _cache = cache;
+ }
 
-    public async Task<MyData> GetDataAsync(string id)
-    {
-        var data = await _cache.GetOrCreateAsync($"data:{id}", async cancellationToken =>
-        {
-            // This code runs only if the data is not in the cache
-            return await FetchDataFromDatabaseAsync(id, cancellationToken);
-        }, options: CacheOptions.FiveMinutes);
+ public async Task<MyData> GetDataAsync(string id)
+ {
+ var data = await _cache.GetOrCreateAsync($"data:{id}", async cancellationToken =>
+ {
+ // This code runs only if the data is not in the cache
+ return await FetchDataFromDatabaseAsync(id, cancellationToken);
+ }, options: CacheOptions.FiveMinutes);
 
-        return data;
-    }
+ return data;
+ }
 
-    private Task<MyData> FetchDataFromDatabaseAsync(string id, CancellationToken cancellationToken)
-    {
-        // Implementation to fetch data from the database
-    }
+ private Task<MyData> FetchDataFromDatabaseAsync(string id, CancellationToken cancellationToken)
+ {
+ // Implementation to fetch data from the database
+ }
 }
 ```
 
-### Using Predefined Cache Durations
-CacheShield includes a `CacheOptions` class with over50 predefined cache durations for convenience.
+### Stale?While?Revalidate and Early Refresh
+Use a `CacheShieldPolicy` to enable SWR and early refresh with jittered expirations.
 
 ```csharp
-using CacheShield;
+var policy = new CacheShieldPolicy
+{
+ SoftTtl = TimeSpan.FromMinutes(2),
+ HardTtl = TimeSpan.FromMinutes(10),
+ EarlyRefreshWindow = TimeSpan.FromSeconds(30),
+ ExpirationJitterFraction =0.15
+};
 
-// Use a predefined cache duration
+var value = await _cache.GetOrCreateAsync(
+ "product:123",
+ ct => FetchFromDbAsync(123, ct),
+ policy);
+```
+
+Behavior:
+- If soft TTL not reached: return cached value.
+- If soft TTL passed but before hard TTL: serve stale and refresh in background.
+- If beyond hard TTL: block a single refresher under per-key lock.
+
+### Global Configuration
+Set global defaults at startup.
+
+```csharp
+CacheShield.Configure(cfg =>
+{
+ cfg.Serializer = new MessagePackSerializerWrapper();
+ cfg.DefaultSoftTtl = TimeSpan.FromMinutes(2);
+ cfg.DefaultHardTtl = TimeSpan.FromMinutes(10);
+ cfg.ExpirationJitterFraction =0.1;
+ cfg.KeyPrefix = "prod:"; // optional
+ cfg.MaxPayloadBytes =1_000_000; // optional safeguard
+ cfg.SkipCachingNullOrDefault = true; // optional
+ cfg.KeyLockEvictionWindow = TimeSpan.FromMinutes(2);
+ cfg.LockWaitTimeout = TimeSpan.FromSeconds(5); // default lock wait, can be overridden per call
+});
+```
+
+### Lock Wait Timeout and Fallback
+Per-call override with policy:
+
+```csharp
+var policy = new CacheShieldPolicy
+{
+ SoftTtl = TimeSpan.FromMinutes(2),
+ HardTtl = TimeSpan.FromMinutes(10),
+ LockWaitTimeout = TimeSpan.FromMilliseconds(100)
+};
+
+var value = await _cache.GetOrCreateAsync("key", ct => ComputeAsync(ct), policy);
+```
+
+If lock can’t be acquired within timeout:
+- Returns last cached payload (even stale) if present.
+- Otherwise computes without setting.
+
+### Bulk Get
+```csharp
+var keys = new[]{"k:1","k:2","k:3"};
+var results = await _cache.GetOrCreateManyAsync(keys, (k, ct) => LoadAsync(k, ct), maxConcurrency:8);
+```
+
+### Using Predefined Cache Durations
+CacheShield includes a `CacheOptions` class with predefined cache durations.
+
+```csharp
 var cacheEntryOptions = CacheOptions.ThirtyMinutes;
 
 var value = await _cache.GetOrCreateAsync("cacheKey", async cancellationToken =>
 {
-    // Compute the value
-    return await ComputeValueAsync(cancellationToken);
+ return await ComputeValueAsync(cancellationToken);
 }, options: cacheEntryOptions);
 ```
 
-### Stateless Get Method
-If your `getMethod` does not need any state or cancellation token, you can use the simpler overload:
+### Stateless, Stateful, and Sync Overloads
+All existing overloads remain and work. Policy-enabled overloads are added; choose the simpler ones if you don’t need SWR.
+
+### Diagnostics
+- ActivitySource: `CacheShield`
+- Meter: `CacheShield`
+Metrics: hits, misses, stale-served, refresh-started/completed, deserialize-failures, lock-wait-ms, compute-ms.
+
+Hook into OpenTelemetry to export.
 
 ```csharp
-var value = await _cache.GetOrCreateAsync("simpleKey", () =>
+// Program.cs (.NET8/9)
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Trace;
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddOpenTelemetry()
+ .ConfigureResource(rb => rb.AddService("my-service"))
+ .WithMetrics(mb => mb
+ .AddMeter("CacheShield")
+ .AddAspNetCoreInstrumentation()
+ .AddRuntimeInstrumentation()
+ .AddProcessInstrumentation()
+ .AddPrometheusExporter())
+ .WithTracing(tb => tb
+ .AddSource("CacheShield")
+ .AddAspNetCoreInstrumentation()
+ .AddHttpClientInstrumentation()
+ .AddConsoleExporter());
+```
+
+Note: On `netstandard2.1` targets, diagnostics are compiled as no-ops.
+
+## Advanced samples
+
+###1) Dynamic SWR policy per key
+```csharp
+CacheShieldPolicy SelectPolicyFor(string key) => key.StartsWith("user:")
+ ? new CacheShieldPolicy { SoftTtl = TimeSpan.FromMinutes(1), HardTtl = TimeSpan.FromMinutes(5), EarlyRefreshWindow = TimeSpan.FromSeconds(15) }
+ : new CacheShieldPolicy { SoftTtl = TimeSpan.FromMinutes(5), HardTtl = TimeSpan.FromMinutes(20), EarlyRefreshWindow = TimeSpan.FromMinutes(1), ExpirationJitterFraction =0.2 };
+
+var policy = SelectPolicyFor(cacheKey);
+var value = await _cache.GetOrCreateAsync(cacheKey, ct => GetDataAsync(ct), policy);
+```
+
+###2) Two-level cache pattern (IMemoryCache L1 over `IDistributedCache` L2)
+```csharp
+public class TwoLevelCache
 {
-    // Compute the value
-    return ComputeValue();
+ private readonly IMemoryCache _l1;
+ private readonly IDistributedCache _l2;
+
+ public TwoLevelCache(IMemoryCache l1, IDistributedCache l2)
+ { _l1 = l1; _l2 = l2; }
+
+ public async Task<T> GetAsync<T>(string key, Func<CancellationToken, ValueTask<T>> factory, CacheShieldPolicy? policy = null, TimeSpan? l1Ttl = null, CancellationToken ct = default)
+ {
+ if (_l1.TryGetValue(key, out T value)) return value!;
+ var v = policy is null
+ ? await _l2.GetOrCreateAsync(key, factory, serializer: null, options: null, cancellationToken: ct)
+ : await _l2.GetOrCreateAsync(key, factory, policy, serializer: null, options: null, cancellationToken: ct);
+ _l1.Set(key, v, l1Ttl ?? TimeSpan.FromSeconds(30)); // L1 TTL <= L2 soft TTL is typical
+ return v;
+ }
+}
+```
+
+###3) Key prefixing and versioning
+```csharp
+// Startup default: prefix all keys for environment/tenant segregation
+CacheShield.Configure(cfg => cfg.KeyPrefix = "prod:tenantA:");
+
+// Version bump: rotate data group by changing prefix
+CacheShield.Configure(cfg => cfg.KeyPrefix = "prod:tenantA:v2:");
+```
+
+###4) Skip null/defaults and cap payload size
+```csharp
+CacheShield.Configure(cfg =>
+{
+ cfg.SkipCachingNullOrDefault = true; // avoid caching missing/sentinel results
+ cfg.MaxPayloadBytes =512 *1024; //512 KB cap
 });
 ```
 
-### Stateful Get Method
-If your `getMethod` requires state, you can use the stateful overload:
-
+###5) Custom serializer with `System.Text.Json`
 ```csharp
-var someState = new MyStateObject();
-
-var value = await _cache.GetOrCreateAsync("statefulKey", someState, (state, cancellationToken) =>
+public sealed class SystemTextJsonSerializer : ISerializer
 {
-    // Use the state object
-    return ComputeValueWithStateAsync(state, cancellationToken);
-});
-```
+ private readonly JsonSerializerOptions _options = new(JsonSerializerDefaults.Web)
+ {
+ DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+ WriteIndented = false,
+ PropertyNameCaseInsensitive = true
+ };
 
-### Preventing Cache Stampede
-CacheShield automatically prevents cache stampedes by ensuring that only one caller computes the value when it's missing. Here's how you can simulate multiple concurrent requests:
+ public byte[] Serialize<T>(T value)
+ {
+ return JsonSerializer.SerializeToUtf8Bytes(value, _options);
+ }
 
-```csharp
-var tasks = new List<Task<string>>();
-
-for (int i =0; i <10; i++)
-{
-    tasks.Add(_cache.GetOrCreateAsync("concurrentKey", async cancellationToken =>
-    {
-        // Simulate a delay in computing the value
-        await Task.Delay(1000, cancellationToken);
-        return "Computed Value";
-    }));
+ public T Deserialize<T>(byte[] bytes)
+ {
+ return JsonSerializer.Deserialize<T>(bytes, _options)!;
+ }
 }
 
-var results = await Task.WhenAll(tasks);
+// Register as default
+CacheShield.Configure(cfg => cfg.Serializer = new SystemTextJsonSerializer());
+```
 
-// All tasks will receive the same computed value
+###6) Lock wait timeouts under load
+```csharp
+var hotKey = "hot:feed";
+var slowPolicy = new CacheShieldPolicy
+{
+ SoftTtl = TimeSpan.FromSeconds(5),
+ HardTtl = TimeSpan.FromSeconds(30),
+ LockWaitTimeout = TimeSpan.FromMilliseconds(50)
+};
+
+var v = await _cache.GetOrCreateAsync(hotKey, async ct =>
+{
+ await Task.Delay(500, ct); // simulate slow origin
+ return await ComputeHotFeedAsync(ct);
+}, slowPolicy);
+```
+
+###7) Bulk pre-warm and fetch
+```csharp
+var ids = Enumerable.Range(1,200).Select(i => $"product:{i}").ToArray();
+var products = await _cache.GetOrCreateManyAsync(ids, (k, ct) => LoadProductAsync(k, ct), maxConcurrency:16);
 ```
 
 ## Under the hood: keyed-lock pool with sliding eviction
@@ -131,250 +288,12 @@ var results = await Task.WhenAll(tasks);
 - Locks are:
  - Rented when a request arrives for a key (ref-count++ and last-used updated).
  - Released when the request completes (ref-count--).
-- A lightweight background sweeper periodically evicts idle locks (ref-count ==0) that have not been used for a sliding window (default:2 minutes).
-- This bounds memory growth over time while preserving correctness and avoiding disposal races.
+- A background sweeper periodically evicts idle locks (ref-count ==0) that have not been used for a sliding window (default from `CacheShield.Config`).
 
 Notes:
-- The keyed locks are process-local. If you need to prevent stampedes across multiple instances, consider adding a distributed lock around the compute section (e.g., Redis-based).
+- The keyed locks are process-local. For cross-instance stampede protection, apply a distributed lock in your compute path.
 - Corrupted cache payloads (deserialization failures) are automatically removed and recomputed.
-- `CacheOptions.Infinite` represents “no expiration” (no absolute or sliding expiry set). Use with care to avoid stale data or unnecessary memory pressure in your backing store.
-
-### Custom Cache Entry Options
-You can provide custom cache entry options if the predefined ones do not meet your needs:
-
-```csharp
-var customOptions = new DistributedCacheEntryOptions
-{
-    AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(15),
-    SlidingExpiration = TimeSpan.FromMinutes(5)
-};
-
-var value = await _cache.GetOrCreateAsync("customKey", async cancellationToken =>
-{
-    // Compute the value
-    return await GetValueAsync(cancellationToken);
-}, options: customOptions);
-```
-
-### Synchronous Get Method
-If your `getMethod` is synchronous, you can use the overload that accepts a synchronous function:
-
-```csharp
-var value = await _cache.GetOrCreateAsync("syncKey", () =>
-{
-    // Compute the value synchronously
-    return "Synchronous Value";
-});
-```
-
-### Using CancellationToken
-You can pass a `CancellationToken` to cancel the operation if needed:
-
-```csharp
-var cancellationTokenSource = new CancellationTokenSource();
-
-var value = await _cache.GetOrCreateAsync("cancellableKey", async cancellationToken =>
-{
-    // Long-running operation that supports cancellation
-    return await LongRunningOperationAsync(cancellationToken);
-}, cancellationToken: cancellationTokenSource.Token);
-```
-
-### Handling Exceptions
-If the `getMethod` throws an exception, it will propagate to the caller. You can handle exceptions as needed:
-
-```csharp
-try
-{
-    var value = await _cache.GetOrCreateAsync("exceptionKey", () =>
-    {
-        // This might throw an exception
-        throw new InvalidOperationException("Something went wrong");
-    });
-}
-catch (InvalidOperationException ex)
-{
-    // Handle the exception
-}
-```
-
-### Custom Serialization
-By default, CacheShield uses MessagePack for serialization. If you need custom serialization, you can implement the `ISerializer` interface and pass your serializer to the `GetOrCreateAsync` method.
-
-```csharp
-using CacheShield;
-
-public class NewtonsoftJsonSerializer : ISerializer
-{
-    public byte[] Serialize<T>(T value)
-    {
-        var json = Newtonsoft.Json.JsonConvert.SerializeObject(value);
-        return System.Text.Encoding.UTF8.GetBytes(json);
-    }
-
-    public T Deserialize<T>(byte[] bytes)
-    {
-        var json = System.Text.Encoding.UTF8.GetString(bytes);
-        return Newtonsoft.Json.JsonConvert.DeserializeObject<T>(json);
-    }
-}
-
-// Usage
-var customSerializer = new NewtonsoftJsonSerializer();
-
-var value = await _cache.GetOrCreateAsync("customSerializerKey", async cancellationToken =>
-{
-    // Compute the value
-    return await GetValueAsync(cancellationToken);
-}, serializer: customSerializer);
-```
-
-### Full Example with Custom Cache Options
-Here's a complete example that demonstrates various features of CacheShield:
-
-```csharp
-using Microsoft.Extensions.Caching.Distributed;
-using CacheShield;
-
-public class ProductService
-{
-    private readonly IDistributedCache _cache;
-
-    public ProductService(IDistributedCache cache)
-    {
-        _cache = cache;
-    }
-
-    public async Task<Product> GetProductAsync(int productId)
-    {
-        var cacheKey = $"product:{productId}";
-
-        var product = await _cache.GetOrCreateAsync(cacheKey, async cancellationToken =>
-        {
-            // Simulate a database call
-            var data = await FetchProductFromDatabaseAsync(productId, cancellationToken);
-            return data;
-        }, options: CacheOptions.TwelveHours);
-
-        return product;
-    }
-
-    private async Task<Product> FetchProductFromDatabaseAsync(int productId, CancellationToken cancellationToken)
-    {
-        // Simulate delay
-        await Task.Delay(500, cancellationToken);
-
-        // Return dummy data
-        return new Product
-        {
-            Id = productId,
-            Name = "Sample Product",
-            Price =19.99m
-        };
-    }
-}
-
-public class Product
-{
-    public int Id { get; set; }
-    public string Name { get; set; }
-    public decimal Price { get; set; }
-}
-```
-
-
-### Advanced Usage with Sliding Expiration
-If you want the cache entry to expire if it's not accessed within a certain period, use `SlidingExpiration`:
-
-```csharp
-var slidingOptions = new DistributedCacheEntryOptions
-{
-    SlidingExpiration = TimeSpan.FromMinutes(30)
-};
-
-var value = await _cache.GetOrCreateAsync("slidingKey", async cancellationToken =>
-{
-    // Compute the value
-    return await ComputeExpensiveValueAsync(cancellationToken);
-}, options: slidingOptions);
-```
-
-### Combining Absolute and Sliding Expiration
-You can combine both absolute and sliding expiration:
-
-```csharp
-var combinedOptions = new DistributedCacheEntryOptions
-{
-    AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(6),
-    SlidingExpiration = TimeSpan.FromMinutes(30)
-};
-
-var value = await _cache.GetOrCreateAsync("combinedKey", async cancellationToken =>
-{
-    // Compute the value
-    return await GetDataAsync(cancellationToken);
-}, options: combinedOptions);
-```
-
-### Using the Infinite Cache Option
-If you have data that rarely changes and you want to cache it indefinitely:
-
-```csharp
-var value = await _cache.GetOrCreateAsync("infiniteKey", async cancellationToken =>
-{
-    // Compute the value
-    return await GetStaticDataAsync(cancellationToken);
-}, options: CacheOptions.Infinite);
-```
-Note: `Infinite` leaves expirations unset (no absolute or sliding expiry). Use cautiously to avoid stale data and memory pressure.
-
-### Using CacheShield in ASP.NET Core
-You can configure `IDistributedCache` in your `Startup.cs` or `Program.cs`:
-
-```csharp
-public void ConfigureServices(IServiceCollection services)
-{
-    services.AddDistributedMemoryCache(); // Or AddStackExchangeRedisCache, etc.
-    services.AddScoped<MyService>();
-}
-```
-Then inject `IDistributedCache` into your services and use CacheShield as demonstrated.
-
-
-### CacheOptions Reference
-CacheShield provides the `CacheOptions` class with predefined cache durations:
-
-* Milliseconds:
- * `TenMilliseconds`
- * `FiftyMilliseconds`
- * `OneHundredMilliseconds`
- * `FiveHundredMilliseconds`
-* Seconds:
- * `OneSecond`
- * `FiveSeconds`
- * `TenSeconds`
- * `ThirtySeconds`
-* Minutes:
- * `OneMinute`
- * `FiveMinutes`
- * `FifteenMinutes`
- * `ThirtyMinutes`
- * `SixtyMinutes`
-* Hours:
- * `OneHour`
- * `SixHours`
- * `TwelveHours`
- * `TwentyFourHours`
-* Days:
- * `OneDay`
- * `SevenDays`
- * `ThirtyDays`
-* Months and Years:
- * `OneMonth` (30 days)
- * `SixMonths` (180 days)
- * `OneYear` (365 days)
-* Infinite:
- * `Infinite` (no expiration)
+- `CacheOptions.Infinite` represents “no expiration”. Use with care.
 
 ## Contributing
 Contributions are welcome! Please open an issue or submit a pull request on GitHub.

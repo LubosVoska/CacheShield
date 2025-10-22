@@ -1,5 +1,4 @@
-﻿using Microsoft.Extensions.Caching.Distributed;
-using System;
+using Microsoft.Extensions.Caching.Distributed;
 
 namespace CacheShield
 {
@@ -70,24 +69,24 @@ namespace CacheShield
         public static DistributedCacheEntryOptions ThreeWeeks { get; } = new() { AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(21) };
         public static DistributedCacheEntryOptions FourWeeks { get; } = new() { AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(28) };
 
-        // Months (approximated as 30 days per month)
+        // Months (approximated as30 days per month)
         public static DistributedCacheEntryOptions OneMonth { get; } = new() { AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(30) };
         public static DistributedCacheEntryOptions TwoMonths { get; } = new() { AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(60) };
         public static DistributedCacheEntryOptions ThreeMonths { get; } = new() { AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(90) };
         public static DistributedCacheEntryOptions SixMonths { get; } = new() { AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(180) };
         public static DistributedCacheEntryOptions NineMonths { get; } = new() { AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(270) };
 
-        // Years (approximated as 365 days per year)
+        // Years (approximated as365 days per year)
         public static DistributedCacheEntryOptions OneYear { get; } = new() { AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(365) };
         public static DistributedCacheEntryOptions TwoYears { get; } = new() { AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(730) };
         public static DistributedCacheEntryOptions ThreeYears { get; } = new() { AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(1095) };
         public static DistributedCacheEntryOptions FiveYears { get; } = new() { AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(1825) };
         public static DistributedCacheEntryOptions TenYears { get; } = new() { AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(3650) };
 
-        // Infinite (No expiration) — leave expirations null for no expiry; avoid TimeSpan.MaxValue overflows
+        // Infinite (No expiration)
         public static DistributedCacheEntryOptions Infinite { get; } = new();
-        
-        // Custom durations for specific use cases
+
+        // Custom durations
         public static DistributedCacheEntryOptions FifteenMilliseconds { get; } = new() { AbsoluteExpirationRelativeToNow = TimeSpan.FromMilliseconds(15) };
         public static DistributedCacheEntryOptions SeventyFiveMilliseconds { get; } = new() { AbsoluteExpirationRelativeToNow = TimeSpan.FromMilliseconds(75) };
         public static DistributedCacheEntryOptions TwentyFiveSeconds { get; } = new() { AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(25) };
@@ -105,4 +104,3 @@ namespace CacheShield
         public static DistributedCacheEntryOptions ThreeHundredSixtyFiveDays { get; } = new() { AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(365) };
     }
 }
-

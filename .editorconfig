@@ -1,0 +1,106 @@
+root = true
+
+# Global defaults
+[*]
+charset = utf-8
+end_of_line = crlf
+insert_final_newline = true
+indent_style = space
+indent_size =4
+trim_trailing_whitespace = true
+
+# C# files
+[*.cs]
+# .NET analyzers
+# Keep analyzers informative by default; elevate important ones to warning
+dotnet_analyzer_diagnostic.severity = suggestion
+
+# Using directives
+dotnet_sort_system_directives_first = true
+dotnet_separate_import_directive_groups = true
+
+# Qualification preferences
+dotnet_style_qualification_for_field = false:suggestion
+dotnet_style_qualification_for_property = false:suggestion
+dotnet_style_qualification_for_method = false:suggestion
+dotnet_style_qualification_for_event = false:suggestion
+
+# Accessibility modifiers
+dotnet_style_require_accessibility_modifiers = for_non_interface_members:warning
+
+# Language preferences
+csharp_style_var_for_built_in_types = true:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_var_elsewhere = true:suggestion
+csharp_style_prefer_switch_expression = true:suggestion
+csharp_style_expression_bodied_methods = when_on_single_line:suggestion
+csharp_style_expression_bodied_properties = when_on_single_line:suggestion
+csharp_style_expression_bodied_ctors = false:suggestion
+csharp_style_expression_bodied_accessors = when_on_single_line:suggestion
+csharp_style_prefer_simple_using_statement = true:suggestion
+csharp_style_prefer_pattern_matching = true:suggestion
+csharp_style_prefer_static_local_function = true:suggestion
+csharp_style_namespace_declarations = file_scoped:suggestion
+csharp_style_prefer_primary_constructors = true:suggestion
+csharp_style_prefer_utf8_string_literals = true:suggestion
+
+# Nullability and patterns
+dotnet_style_prefer_is_null_check_over_reference_equality_method = true:suggestion
+dotnet_style_prefer_simplified_boolean_expressions = true:suggestion
+dotnet_style_prefer_simplified_interpolation = true:suggestion
+
+# Braces and new lines
+csharp_prefer_braces = true:warning
+csharp_style_allow_embedded_statements_on_same_line = false:warning
+csharp_new_line_before_open_brace = all
+csharp_new_line_between_query_expression_clauses = true
+
+# Indentation
+csharp_indent_case_contents = true
+csharp_indent_case_contents_when_block = true
+csharp_indent_labels = one_less_than_current
+csharp_indent_block_contents = true
+csharp_indent_switch_labels = true
+
+# File header (optional)
+# file_header_template =
+
+# XML/Props/Targets
+[*.{csproj,props,targets}]
+indent_style = space
+indent_size =2
+
+# JSON
+[*.json]
+indent_style = space
+indent_size =2
+
+# Markdown
+[*.md]
+trim_trailing_whitespace = false
+
+# Tests: keep suggestions low-noise
+[tests/**.cs]
+dotnet_analyzer_diagnostic.severity = suggestion
+
+# Naming rules
+# Interfaces must start with I
+[*.cs]
+dotnet_naming_rule.interfaces_should_start_with_i.severity = suggestion
+dotnet_naming_rule.interfaces_should_start_with_i.symbols = interface_symbols
+dotnet_naming_rule.interfaces_should_start_with_i.style = prefix_i
+
+dotnet_naming_symbols.interface_symbols.applicable_kinds = interface
+
+dotnet_naming_style.prefix_i.required_prefix = I
+
+# Async methods should end with Async (informational)
+dotnet_naming_rule.async_methods_should_end_with_async.severity = suggestion
+dotnet_naming_rule.async_methods_should_end_with_async.symbols = async_methods
+dotnet_naming_rule.async_methods_should_end_with_async.style = end_with_async
+
+dotnet_naming_symbols.async_methods.applicable_kinds = method
+dotnet_naming_symbols.async_methods.applicable_accessibilities = *
+dotnet_naming_symbols.async_methods.required_modifiers = async
+
+dotnet_naming_style.end_with_async.required_suffix = Async

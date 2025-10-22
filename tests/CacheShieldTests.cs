@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -50,7 +50,7 @@ namespace CacheShield.Tests
             byte[] serializedValue = _defaultSerializer.Serialize(expectedValue);
 
             _cacheMock.Setup(c => c.GetAsync(key, It.IsAny<CancellationToken>()))
-                      .ReturnsAsync((byte[])null);
+                      .ReturnsAsync((byte[]?)null);
             _cacheMock.Setup(c => c.SetAsync(key, It.IsAny<byte[]>(),
                 It.IsAny<DistributedCacheEntryOptions>(), It.IsAny<CancellationToken>()))
                       .Returns(Task.CompletedTask)
@@ -109,7 +109,7 @@ namespace CacheShield.Tests
             byte[] serializedValue = _defaultSerializer.Serialize(expectedValue);
 
             _cacheMock.Setup(c => c.GetAsync(key, It.IsAny<CancellationToken>()))
-                      .ReturnsAsync((byte[])null);
+                      .ReturnsAsync((byte[]?)null);
             _cacheMock.Setup(c => c.SetAsync(key, It.IsAny<byte[]>(),
                 It.IsAny<DistributedCacheEntryOptions>(), It.IsAny<CancellationToken>()))
                       .Returns(Task.CompletedTask)
@@ -150,7 +150,7 @@ namespace CacheShield.Tests
                                 .Returns(serializedValue);
 
             _cacheMock.Setup(c => c.GetAsync(key, It.IsAny<CancellationToken>()))
-                      .ReturnsAsync((byte[])null);
+                      .ReturnsAsync((byte[]?)null);
             _cacheMock.Setup(c => c.SetAsync(key, serializedValue,
                 It.IsAny<DistributedCacheEntryOptions>(), It.IsAny<CancellationToken>()))
                       .Returns(Task.CompletedTask)
@@ -269,7 +269,7 @@ namespace CacheShield.Tests
             string key = "test_key";
 
             _cacheMock.Setup(c => c.GetAsync(key, It.IsAny<CancellationToken>()))
-                      .ReturnsAsync((byte[])null);
+                      .ReturnsAsync((byte[]?)null);
 
             Func<CancellationToken, ValueTask<string>> getMethod = async ct =>
             {
@@ -304,7 +304,7 @@ namespace CacheShield.Tests
             byte[] serializedValue = _defaultSerializer.Serialize(expectedValue);
 
             _cacheMock.Setup(c => c.GetAsync(key, It.IsAny<CancellationToken>()))
-                      .ReturnsAsync((byte[])null);
+                      .ReturnsAsync((byte[]?)null);
             _cacheMock.Setup(c => c.SetAsync(key, serializedValue,
                 It.IsAny<DistributedCacheEntryOptions>(), It.IsAny<CancellationToken>()))
                       .Returns(Task.CompletedTask)
@@ -349,7 +349,7 @@ namespace CacheShield.Tests
             string expected = "val";
 
             _cacheMock.Setup(c => c.GetAsync(key, It.IsAny<CancellationToken>()))
-                      .ReturnsAsync((byte[])null);
+                      .ReturnsAsync((byte[]?)null);
 
             _cacheMock.Setup(c => c.SetAsync(
                 key,
@@ -382,7 +382,7 @@ namespace CacheShield.Tests
             string expected = $"state:{state}";
 
             _cacheMock.Setup(c => c.GetAsync(key, It.IsAny<CancellationToken>()))
-                      .ReturnsAsync((byte[])null);
+                      .ReturnsAsync((byte[]?)null);
             _cacheMock.Setup(c => c.SetAsync(
                 key,
                 It.IsAny<byte[]>(),
@@ -409,7 +409,7 @@ namespace CacheShield.Tests
             string expected = "state:ok";
 
             _cacheMock.Setup(c => c.GetAsync(key, It.IsAny<CancellationToken>()))
-                      .ReturnsAsync((byte[])null);
+                      .ReturnsAsync((byte[]?)null);
             _cacheMock.Setup(c => c.SetAsync(
                 key,
                 It.IsAny<byte[]>(),

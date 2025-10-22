@@ -1,4 +1,4 @@
-﻿namespace CacheShield
+namespace CacheShield
 {
     /// <summary>
     /// Default implementation of ISerializer using MessagePack.
@@ -10,9 +10,9 @@
         public MessagePackSerializerWrapper()
         {
             _options = MessagePack.MessagePackSerializerOptions.Standard
-                .WithResolver(MessagePack.Resolvers.ContractlessStandardResolver.Instance)
-                .WithCompression(MessagePack.MessagePackCompression.Lz4BlockArray)
-                .WithSecurity(MessagePack.MessagePackSecurity.UntrustedData);
+            .WithResolver(MessagePack.Resolvers.ContractlessStandardResolver.Instance)
+            .WithCompression(MessagePack.MessagePackCompression.Lz4BlockArray)
+            .WithSecurity(MessagePack.MessagePackSecurity.UntrustedData);
         }
 
         public byte[] Serialize<T>(T value)

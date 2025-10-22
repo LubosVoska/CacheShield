@@ -8,18 +8,25 @@ namespace CacheShield
     internal sealed class KeyLockPool
     {
         private readonly ConcurrentDictionary<string, Entry> _locks = new ConcurrentDictionary<string, Entry>();
-        private readonly TimeSpan _evictionWindow;
-        private readonly Timer _sweeper;
+        private TimeSpan _evictionWindow;
+        private Timer _sweeper;
 
-        // Shared singleton with a reasonable default eviction window
-        internal static readonly KeyLockPool Shared = new KeyLockPool(TimeSpan.FromMinutes(2));
+        private static KeyLockPool s_shared = new KeyLockPool(TimeSpan.FromMinutes(2));
+        internal static KeyLockPool Shared => Volatile.Read(ref s_shared);
 
         private KeyLockPool(TimeSpan evictionWindow)
         {
             _evictionWindow = evictionWindow <= TimeSpan.Zero ? TimeSpan.FromMinutes(2) : evictionWindow;
-            // Sweep roughly once per eviction window; minimum of 30 seconds
             var period = _evictionWindow < TimeSpan.FromSeconds(30) ? TimeSpan.FromSeconds(30) : _evictionWindow;
             _sweeper = new Timer(Sweep, null, period, period);
+        }
+
+        internal static void ConfigureShared(TimeSpan evictionWindow)
+        {
+            if (evictionWindow <= TimeSpan.Zero) evictionWindow = TimeSpan.FromMinutes(2);
+            var replacement = new KeyLockPool(evictionWindow);
+            var old = Interlocked.Exchange(ref s_shared, replacement);
+            old.Dispose();
         }
 
         internal Entry Rent(string key)
@@ -34,11 +41,9 @@ namespace CacheShield
         {
             if (Interlocked.Decrement(ref entry.RefCount) == 0)
             {
-                // Evict immediately if it has been idle long enough
                 var last = Volatile.Read(ref entry.LastUsedTicks);
                 if (DateTime.UtcNow.Ticks - last >= _evictionWindow.Ticks)
                 {
-                    // Remove only if the current mapping matches the same Entry instance
                     var pair = new KeyValuePair<string, Entry>(key, entry);
                     if (((ICollection<KeyValuePair<string, Entry>>)_locks).Remove(pair))
                     {
@@ -48,7 +53,7 @@ namespace CacheShield
             }
         }
 
-        private void Sweep(object? _)
+        private void Sweep(object _)
         {
             var nowTicks = DateTime.UtcNow.Ticks;
             foreach (var kvp in _locks)
@@ -59,7 +64,6 @@ namespace CacheShield
                     var last = Volatile.Read(ref entry.LastUsedTicks);
                     if (nowTicks - last >= _evictionWindow.Ticks)
                     {
-                        // Remove only if the current mapping matches the same Entry instance
                         var pair = new KeyValuePair<string, Entry>(kvp.Key, kvp.Value);
                         if (((ICollection<KeyValuePair<string, Entry>>)_locks).Remove(pair))
                         {
@@ -68,6 +72,16 @@ namespace CacheShield
                     }
                 }
             }
+        }
+
+        public void Dispose()
+        {
+            _sweeper.Dispose();
+            foreach (var kv in _locks)
+            {
+                kv.Value.Dispose();
+            }
+            _locks.Clear();
         }
 
         internal sealed class Entry : IDisposable

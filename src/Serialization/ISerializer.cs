@@ -1,4 +1,4 @@
-﻿namespace CacheShield
+namespace CacheShield
 {
     /// <summary>
     /// Interface for serialization and deserialization of objects.
