@@ -15,6 +15,20 @@ namespace CacheShield.Tests
         {
             _cacheMock = new Mock<IDistributedCache>();
             _defaultSerializer = new MessagePackSerializerWrapper();
+
+            // Reset global config between tests to stable defaults
+            CacheShield.Configure(cfg =>
+            {
+                cfg.Serializer = new MessagePackSerializerWrapper();
+                cfg.DefaultHardTtl = TimeSpan.FromMinutes(5);
+                cfg.DefaultSoftTtl = TimeSpan.FromMinutes(2);
+                cfg.ExpirationJitterFraction = 0.0;
+                cfg.KeyLockEvictionWindow = TimeSpan.FromMinutes(2);
+                cfg.KeyPrefix = null;
+                cfg.MaxPayloadBytes = null;
+                cfg.SkipCachingNullOrDefault = false;
+                cfg.LockWaitTimeout = null;
+            });
         }
 
         [Fact]
